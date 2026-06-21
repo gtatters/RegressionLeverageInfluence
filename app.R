@@ -105,6 +105,8 @@ ui <- fluidPage(
     # ---------------------------
     column(
       width = 9,
+      p(HTML("&#x1F449; Click anywhere on the left plot to move the <span style='color:red;'>red point (&#9650)</span> and observe how it affects the regression and diagnostics."),
+        style = "text-align:center; color:#555; font-style:italic; font-weight: bold; margin-bottom:6px;"),
       fluidRow(
         
         # Left: raw data plot + summary table
