@@ -68,6 +68,10 @@ ui <- fluidPage(
       width = 3,
       div(class = "sidebar",
           
+          p(strong("Diagnosing Influential Data points")),
+          p("Click anywhere on the left plot to move the red point and observe how it affects the regression and diagnostics."),
+          p("Change the sample size or Resample to reset the data to examine influence with different data sets"),
+          #hr(),
           sliderInput("sample_size", "Sample size:",
                       min = 5, max = 100, value = 10),
           
@@ -87,7 +91,7 @@ ui <- fluidPage(
                        choiceValues = 1:6,
                        selected = 1),
           
-          radioButtons("model_choice", "Model",
+          radioButtons("model_choice", "Model for diagnostics",
                        choices = c(
                          "All data (red point included)" = "all",
                          "Black points only"             = "black"
@@ -105,14 +109,14 @@ ui <- fluidPage(
     # ---------------------------
     column(
       width = 9,
-      p(HTML("&#x1F449; Click anywhere on the left plot to move the <span style='color:red;'>red point (&#9650)</span> and observe how it affects the regression and diagnostics."),
-        style = "text-align:center; color:#555; font-style:italic; font-weight: bold; margin-bottom:6px;"),
+      #p(HTML("&#x1F449; Click anywhere on the left plot to move the <span style='color:red;'>red point (&#9650)</span> and observe how it affects the regression and diagnostics."),
+      #  style = "text-align:center; color:#555; font-style:italic; font-weight: bold; margin-bottom:6px;"),
       fluidRow(
         
         # Left: raw data plot + summary table
         column(
           width = 6,
-          plotOutput("rawPlot", height = "400px", click = "plot_click"),
+          plotOutput("rawPlot", height = "500px", click = "plot_click"),
           tags$div(
             style = "background-color:#f9f9f9;
                      padding:12px;
@@ -126,7 +130,7 @@ ui <- fluidPage(
         # Right: diagnostic plot + interpretation
         column(
           width = 6,
-          plotOutput("diagnostic_plot", height = "400px"),
+          plotOutput("diagnostic_plot", height = "500px"),
           tags$div(
             style = "background-color:#f9f9f9;
                      padding:12px;
