@@ -26,6 +26,26 @@ generate_data <- function(n) {
 }
 
 # ---------------------------
+# Safari-safe plotting
+# Draws a base-R plot as a PNG image. Stand-in for renderPlot(), which
+# currently fails in Safari under Shinylive. Use with imageOutput().
+# ---------------------------
+render_base <- function(id, session, draw) {
+  renderImage({
+    cd <- session$clientData
+    w  <- cd[[paste0("output_", id, "_width")]]
+    h  <- cd[[paste0("output_", id, "_height")]]
+    req(w > 0, h > 0)
+    pr <- cd$pixelratio
+    if (is.null(pr)) pr <- 1
+    f <- tempfile(fileext = ".png")
+    png(f, width = w * pr, height = h * pr, res = 72 * pr)
+    tryCatch(draw(), finally = dev.off())
+    list(src = f, contentType = "image/png", width = w, height = h)
+  }, deleteFile = TRUE)
+}
+
+# ---------------------------
 # UI
 # ---------------------------
 ui <- fluidPage(
@@ -116,7 +136,7 @@ ui <- fluidPage(
         # Left: raw data plot + summary table
         column(
           width = 6,
-          plotOutput("rawPlot", height = "500px", click = "plot_click"),
+          imageOutput("rawPlot", height = "500px", click = "plot_click"),
           tags$div(
             style = "background-color:#f9f9f9;
                      padding:12px;
@@ -130,7 +150,7 @@ ui <- fluidPage(
         # Right: diagnostic plot + interpretation
         column(
           width = 6,
-          plotOutput("diagnostic_plot", height = "500px"),
+          imageOutput("diagnostic_plot", height = "500px"),
           tags$div(
             style = "background-color:#f9f9f9;
                      padding:12px;
@@ -174,11 +194,40 @@ server <- function(input, output, session) {
     plot_data(generate_data(input$sample_size))
   })
   
+  # ---------------------------
+  # Click handling
+  # An image (unlike renderPlot) reports clicks in screen pixels, so the
+  # raw plot records where its axes sit each time it is drawn, and the
+  # click is converted back into x/y data units here.
+  # ---------------------------
+  raw_geom <- NULL   # filled in by output$rawPlot
+  
+  click_to_data <- function(click, g) {
+    # Position of the click as a fraction across / down the whole image
+    if (!is.null(click$coords_css)) {
+      fx <- click$coords_css$x / g$w
+      fy <- click$coords_css$y / g$h
+    } else if (!is.null(click$domain)) {
+      fx <- (click$x - click$domain$left) / (click$domain$right  - click$domain$left)
+      fy <- (click$y - click$domain$top)  / (click$domain$bottom - click$domain$top)
+    } else {
+      fx <- click$x / g$w
+      fy <- click$y / g$h
+    }
+    ny <- 1 - fy   # graphics measures height from the bottom
+    list(
+      x = g$usr[1] + (fx - g$x0) / (g$x1 - g$x0) * (g$usr[2] - g$usr[1]),
+      y = g$usr[3] + (ny - g$y0) / (g$y1 - g$y0) * (g$usr[4] - g$usr[3])
+    )
+  }
+  
   # Clicking the raw plot moves the red point
   observeEvent(input$plot_click, {
+    req(raw_geom)
+    pt  <- click_to_data(input$plot_click, raw_geom)
     dat <- plot_data()
-    dat[nrow(dat), "x"] <- input$plot_click$x
-    dat[nrow(dat), "y"] <- input$plot_click$y
+    dat[nrow(dat), "x"] <- pt$x
+    dat[nrow(dat), "y"] <- pt$y
     plot_data(dat)
   })
   
@@ -200,13 +249,13 @@ server <- function(input, output, session) {
   })
   
   model_label <- reactive({
-    if (input$model_choice == "all") " — All" else " — Black"
+    if (input$model_choice == "all") " (all data)" else " (black points only)"
   })
   
   # ---------------------------
   # Raw data plot (base R)
   # ---------------------------
-  output$rawPlot <- renderPlot({
+  output$rawPlot <- render_base("rawPlot", session, function() {
     
     dat    <- plot_data()
     black  <- dat[dat$colour == "black", ]
@@ -237,13 +286,13 @@ server <- function(input, output, session) {
          main = paste0("Data and fitted regression lines", model_label()),
          las  = 1)
     
-    # Shaded 95% CI — all data (red, semi-transparent)
+    # Shaded 95% CI: all data (red, semi-transparent)
     polygon(c(x_seq, rev(x_seq)),
             c(ci_all$lwr, rev(ci_all$upr)),
             col    = adjustcolor("red",   alpha.f = 0.15),
             border = NA)
     
-    # Shaded 95% CI — black only (grey, semi-transparent)
+    # Shaded 95% CI: black only (grey, semi-transparent)
     polygon(c(x_seq, rev(x_seq)),
             c(ci_black$lwr, rev(ci_black$upr)),
             col    = adjustcolor("black", alpha.f = 0.10),
@@ -265,6 +314,19 @@ server <- function(input, output, session) {
            lty    = c(1, 1, NA),
            pch    = c(NA, NA, 17),
            lwd    = 2, bty = "n", cex = 0.85)
+    
+    # Record where the axes sit (as fractions of the image) so clicks
+    # can be converted to data units. <<- stores it outside this function.
+    usr <- par("usr")
+    raw_geom <<- list(
+      usr = usr,
+      x0  = grconvertX(usr[1], "user", "ndc"),
+      x1  = grconvertX(usr[2], "user", "ndc"),
+      y0  = grconvertY(usr[3], "user", "ndc"),
+      y1  = grconvertY(usr[4], "user", "ndc"),
+      w   = session$clientData$output_rawPlot_width,
+      h   = session$clientData$output_rawPlot_height
+    )
   })
   
   # ---------------------------
@@ -317,7 +379,7 @@ server <- function(input, output, session) {
     cook_thresh <- 4 / n
     
     # Index of the red point within this model's data.
-    # integer(0) when black-only model is active — no red point present.
+    # integer(0) when black-only model is active (no red point present).
     if (input$model_choice == "all") {
       red_idx <- which(dat$colour == "red")
     } else {
@@ -343,7 +405,7 @@ server <- function(input, output, session) {
   # ---------------------------
   # Diagnostic plots (base R)
   # ---------------------------
-  output$diagnostic_plot <- renderPlot({
+  output$diagnostic_plot <- render_base("diagnostic_plot", session, function() {
     
     req(mods())
     dd      <- diag_data()
@@ -354,7 +416,7 @@ server <- function(input, output, session) {
     choice <- as.numeric(input$choice)
     title  <- paste0(diag_titles[choice], model_label())
     
-    # Overlay the red triangle — called after each plot is drawn
+    # Overlay the red triangle; called after each plot is drawn
     mark_red <- function(x_val, y_val) {
       points(x_val, y_val, col = "red", pch = 17, cex = 2)
     }
